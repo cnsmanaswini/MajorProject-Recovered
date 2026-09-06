@@ -359,7 +359,7 @@ async def _load_wellness_candidates(
     """Fetch a small candidate pool of wellness content for injection."""
     cutoff = datetime.utcnow() - timedelta(days=WELLNESS_RECENCY_DAYS)
 
-    query = select(Post).options(selectinload(Post.media)).where(
+    query = select(Post).options(selectinload(Post.media), selectinload(Post.author)).where(
         Post.created_at >= cutoff,
         Post.user_id != user_id,
         Post.sentiment == "positive",
@@ -597,7 +597,7 @@ async def build_feed(
     if following_ids:
         followed_result = await db.execute(
             select(Post)
-            .options(selectinload(Post.media))
+            .options(selectinload(Post.media), selectinload(Post.author))
             .where(
                 Post.user_id.in_(following_ids),
                 Post.created_at >= cutoff,
@@ -612,7 +612,7 @@ async def build_feed(
     # Explore posts (from non-followed users)
     explore_result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(
             Post.user_id != user_id,
             Post.created_at >= cutoff,

@@ -5,7 +5,7 @@ GET  /api/posts/{id}     → get post
 DELETE /api/posts/{id}   → delete post
 POST /api/posts/{id}/like → like/unlike post
 """
-
+from services.cloudinary_service import UPLOAD_ROOT
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -173,11 +173,17 @@ async def create_post(
         else None
     )
 
+    # analyze_text/_load_image needs an actual file path for local uploads —
+    # the "/uploads/..." url is only servable over HTTP, not a real disk location.
+    media_source_for_analysis = media_url_for_analysis
+    if media_source_for_analysis and media_source_for_analysis.startswith("/uploads/"):
+        media_source_for_analysis = str(UPLOAD_ROOT / media_source_for_analysis.removeprefix("/uploads/"))
+
     risk_history = await get_user_risk_history(user.id, db)
     pipeline = analyze_text(
         text_to_analyze,
         risk_history,
-        media_source=media_url_for_analysis,
+        media_source=None,   # ← text-only analysis, media analysis disabled
         original_content=content,
     )
 
@@ -281,7 +287,7 @@ async def get_user_posts(
 ):
     result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(Post.user_id == user_id)
         .order_by(Post.created_at.desc())
         .limit(limit)
@@ -307,7 +313,7 @@ async def get_post(
 
     result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(Post.id == post_id)
     )
     post = result.scalar_one_or_none()
@@ -338,7 +344,7 @@ async def delete_post(
 
     result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(Post.id == post_id)
     )
     post = result.scalar_one_or_none()

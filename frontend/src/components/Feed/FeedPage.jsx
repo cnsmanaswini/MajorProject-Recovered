@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Heart, MessageCircle, Share2, Bookmark, Send, Image, Video, RefreshCw, MapPin, Search, X, Layers, MoreHorizontal, Flag, EyeOff } from 'lucide-react'
+import { Heart, MessageCircle, Share2, Bookmark, Send, Image, Video, RefreshCw, MapPin, Search, X, Layers, MoreHorizontal, Flag, EyeOff, Trash2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import clsx from 'clsx'
 import { useAuth } from '../../context/AuthContext'
@@ -155,6 +155,17 @@ function PostCard({ post, onLike, onHide, trackImpressions = true }) {
       onHide?.(post.id)
     } catch {
       setFeedbackMsg('Could not save your preference.')
+    }
+  }
+
+  const handleDelete = async () => {
+    setShowMenu(false)
+    if (!window.confirm('Delete this post? This cannot be undone.')) return
+    try {
+      await api.delete(`/posts/${post.id}`)
+      onHide?.(post.id)
+    } catch {
+      setFeedbackMsg('Could not delete post.')
     }
   }
 

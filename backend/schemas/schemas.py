@@ -2,7 +2,7 @@
 Pydantic schemas for MindGram API
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 
@@ -76,6 +76,11 @@ class PostOut(BaseModel):
     is_liked: bool = False
     is_wellness: bool = False
     author: Optional[UserOut] = None
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def coerce_topics(cls, v):
+        return v or []
 
     class Config:
         from_attributes = True

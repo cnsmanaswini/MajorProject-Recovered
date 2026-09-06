@@ -91,10 +91,10 @@ async def create_post_with_ai(
 
     media_items = []
     if body.image_url:
-        media_items.append(PostMedia(media_type="image", url=body.image_url, position=0))
+        media_items.append(PostMedia(post_id=post.id, media_type="image", url=body.image_url, position=0))
     if body.video_url:
-        media_items.append(PostMedia(media_type="video", url=body.video_url, position=len(media_items)))
-    post.media = media_items
+        media_items.append(PostMedia(post_id=post.id, media_type="video", url=body.video_url, position=len(media_items)))
+    db.add_all(media_items)
 
     # 3 — Emotion log
     log = EmotionLog(
@@ -139,7 +139,7 @@ async def fetch_user_posts(user_id: int, db: AsyncSession, limit: int = 20) -> l
     """Retrieve a user's posts ordered by recency."""
     result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(Post.user_id == user_id)
         .order_by(Post.created_at.desc())
         .limit(limit)

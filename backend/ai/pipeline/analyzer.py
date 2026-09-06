@@ -451,12 +451,12 @@ SENTIMENT_MAP = {
 
 EMOTION_LABELS = {
     "anger": "anger",
-    "disgust": "disgust",
+    "disgust": "anger",
     "fear": "fear",
     "joy": "joy",
     "neutral": "neutral",
     "sadness": "sadness",
-    "surprise": "surprise",
+    "surprise": "fear",
 }
 
 NEGATIVE_EMOTIONS = {"anger", "disgust", "fear", "sadness"}
@@ -492,12 +492,22 @@ def run_sentiment(text: str) -> tuple[str, float]:
     return label, round(score, 4)
 
 
+# Below this confidence, the top-1 label isn't a real signal -- it's the
+# model picking the least-bad option among several it's unsure about.
+# Falling back to neutral here is honest about that uncertainty instead
+# of quietly presenting a coin-flip guess as a confident classification.
+EMOTION_CONFIDENCE_FLOOR = 0.5
+
+
 def run_emotion(text: str) -> tuple[str, float]:
     model = get_model("emotion")
     result = _top_result(model(text))
     label = result["label"].lower()
     label = EMOTION_LABELS.get(label, "neutral")
-    return label, round(result["score"], 4)
+    score = round(result["score"], 4)
+    if score < EMOTION_CONFIDENCE_FLOOR:
+        return "neutral", score
+    return label, score
 
 
 def run_sarcasm(text: str) -> tuple[bool, float]:

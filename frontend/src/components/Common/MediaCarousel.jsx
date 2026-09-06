@@ -111,6 +111,7 @@ export default function MediaCarousel({
           className="w-full h-full object-cover"
           controls
           playsInline
+          preload="metadata"
           style={inLightbox ? { objectFit: 'contain', maxHeight: '90vh' } : {}}
         />
       )

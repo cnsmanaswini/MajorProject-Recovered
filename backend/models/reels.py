@@ -15,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from database import Base  # adjust import path if your Base lives elsewhere
+from models.database import Base  # adjust import path if your Base lives elsewhere
 
 
 class Audio(Base):
@@ -30,7 +30,7 @@ class Audio(Base):
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # null = "original audio" owner is the post creator
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    reels = relationship("Post", back_populates="audio")
+   # reels = relationship("Post", back_populates="audio")  # TODO: unfinished feature — Post has no `audio` relationship / is_reel column yet
 
 
 class ReelView(Base):
@@ -61,7 +61,7 @@ class SavedReel(Base):
 class NotInterested(Base):
     """User marked a reel as 'not interested' — feeds negative signal into ranking
     and permanently excludes it from that user's feed."""
-    __tablename__ = "not_interested"
+    __tablename__ = "reel_not_interested"
     __table_args__ = (UniqueConstraint("user_id", "reel_id", name="uq_user_reel_not_interested"),)
 
     id = Column(Integer, primary_key=True, index=True)
@@ -73,7 +73,7 @@ class NotInterested(Base):
 
 class Report(Base):
     """Content report."""
-    __tablename__ = "reports"
+    __tablename__ = "reel_reports"
 
     id = Column(Integer, primary_key=True, index=True)
     reporter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)

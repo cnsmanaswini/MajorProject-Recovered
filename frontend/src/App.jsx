@@ -11,7 +11,7 @@ import { useAuth } from './context/AuthContext.jsx'
 // Pages
 import AuthPage from './pages/AuthPage.jsx'
 import FeedPage from './components/Feed/FeedPage.jsx'
-import ExplorePage from './components/Feed/ExplorePage.jsx'
+import ExplorePage from './components/Feed/Explorepage.jsx'
 import ReelsPage from './components/Reels/ReelsPage.jsx'
 import MessagesPage from './components/Messages/MessagesPage.jsx'
 import DashboardPage from './components/Dashboard/DashboardPage.jsx'

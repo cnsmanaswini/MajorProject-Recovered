@@ -2,14 +2,17 @@
 Chat module — FastAPI routes.
 Mount with: app.include_router(router, prefix="/chat", tags=["chat"])
 """
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
+import models.models as models
+import schemas.chat as schemas
 
-from app.database import get_db          # adjust to your project
-from app.auth import get_current_user     # adjust to your project
+from models.database import get_db         # adjust to your project
+from routers.auth import get_current_user    # adjust to your project
 
-from . import models, schemas, ai_analysis
+
 
 router = APIRouter()
 

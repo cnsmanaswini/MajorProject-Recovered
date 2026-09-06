@@ -9,6 +9,14 @@ import {
 } from "lucide-react";
 import { EmotionBadge } from "../Common/Badges.jsx";
 import clsx from "clsx";
+import { useAuth } from "../../context/AuthContext.jsx";
+
+function reelVideoUrl(reel) {
+  if (reel?.video_url) return reel.video_url;
+  const media = Array.isArray(reel?.media) ? reel.media : [];
+  const video = media.find((m) => m.media_type === "video" && m.url);
+  return video?.url || media[0]?.url || "";
+}
 
 function ReelCard({ reel, isActive }) {
   const videoRef = useRef(null);
@@ -61,10 +69,10 @@ function ReelCard({ reel, isActive }) {
   return (
     <div className="relative h-[calc(100vh-120px)] min-h-[500px] rounded-2xl overflow-hidden bg-black flex-shrink-0 w-full max-w-sm mx-auto snap-start">
 
-      {reel.video_url ? (
+      {reelVideoUrl(reel) ? (
         <video
           ref={videoRef}
-          src={reel.video_url}
+          src={reelVideoUrl(reel)}
           muted={muted}
           loop
           playsInline
@@ -155,13 +163,13 @@ function ReelCard({ reel, isActive }) {
         <div className="flex items-center gap-2 mb-2">
 
           <img
-            src={reel.author?.avatar_url}
+            src={reel.author?.avatar_url || reel.creator?.profile_picture_url || `https://api.dicebear.com/9.x/avataaars/svg?seed=${reel.author?.username || reel.creator?.username || "user"}`}
             alt=""
             className="w-8 h-8 rounded-full border border-white/30"
           />
 
           <span className="text-white font-medium text-sm">
-            @{reel.author?.username}
+            @{reel.author?.username || reel.creator?.username || "user"}
           </span>
 
           <button className="pill border border-white/30 text-white text-xs px-2 py-0.5">
@@ -171,7 +179,7 @@ function ReelCard({ reel, isActive }) {
         </div>
 
         <p className="text-white text-sm leading-relaxed">
-          {reel.content}
+          {reel.content || reel.caption || ""}
         </p>
 
       </div>
@@ -180,6 +188,7 @@ function ReelCard({ reel, isActive }) {
   );
 }
 export default function ReelsPage() {
+  const { api } = useAuth();
   const [activeIndex, setActiveIndex] = useState(0);
   const [reels, setReels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -192,30 +201,15 @@ export default function ReelsPage() {
   const fetchReels = async () => {
     try {
       setLoading(true);
+      setError("");
 
-      const token = localStorage.getItem("token");
-
-      const response = await fetch("/api/feed/reels", {
-        headers: token
-          ? {
-              Authorization: `Bearer ${token}`,
-            }
-          : {},
-      });
-
-      if (!response.ok) {
-        const txt = await response.text();
-        throw new Error(txt || "Failed to fetch reels");
-      }
-
-      const data = await response.json();
-
-      console.log("Fetched Reels:", data);
-
-      setReels(Array.isArray(data) ? data : []);
+      const response = await api.get("/feed/reels");
+      const data = response.data;
+      const list = Array.isArray(data) ? data : (data?.reels || []);
+      setReels(list);
     } catch (err) {
       console.error("Error loading reels:", err);
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || "Failed to fetch reels");
     } finally {
       setLoading(false);
     }

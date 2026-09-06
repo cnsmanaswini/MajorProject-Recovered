@@ -24,12 +24,11 @@ W_WELLNESS = 0.15      # smooths away from a spiral of consistently negative con
 
 def _engagement_score(reel) -> float:
     """Normalize engagement using a log curve so viral outliers don't dominate."""
-    weighted = (
-        reel.like_count * 1.0
-        + reel.comment_count * 2.0
-        + reel.share_count * 3.0
-        + reel.save_count * 2.5
-    )
+    likes = getattr(reel, "like_count", None) or getattr(reel, "likes_count", 0) or 0
+    comments = getattr(reel, "comment_count", None) or getattr(reel, "comments_count", 0) or 0
+    shares = getattr(reel, "share_count", None) or getattr(reel, "shares_count", 0) or 0
+    saves = getattr(reel, "save_count", 0) or 0
+    weighted = likes * 1.0 + comments * 2.0 + shares * 3.0 + saves * 2.5
     return min(1.0, math.log1p(weighted) / math.log1p(2000))  # cap at ~2000 weighted actions
 
 
@@ -54,7 +53,8 @@ def _affinity_score(reel, user_signals: Dict[str, Any]) -> float:
     if reel_hashtags & fav_hashtags:
         score += 0.3
 
-    if reel.audio_id and reel.audio_id in user_signals.get("favorite_audio_ids", set()):
+    audio_id = getattr(reel, "audio_id", None)
+    if audio_id and audio_id in user_signals.get("favorite_audio_ids", set()):
         score += 0.2
 
     return min(1.0, score)
@@ -89,7 +89,10 @@ def _build_reason(scores: Dict[str, float], reel, following: bool) -> str:
     reasons = {
         "engagement": "Popular right now — lots of likes, comments and shares",
         "recency": "Recently posted",
-        "relationship": f"From @{reel.creator.username}, who you follow" if following else "From an account you interact with",
+        "relationship": (
+            f"From @{getattr(getattr(reel, 'creator', None) or getattr(reel, 'author', None), 'username', 'user')}, who you follow"
+            if following else "From an account you interact with"
+        ),
         "affinity": "Similar to content you've engaged with before",
         "wellness": "Chosen to keep your feed balanced",
     }

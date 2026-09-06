@@ -129,6 +129,9 @@ export default function ProfilePage() {
         setPosts(postsRes.data || [])
         setAnalytics(analyticsRes.data)
         setAgentStatus(agentRes.data)
+      } catch {
+        setProfile(null)
+        setPosts([])
       } finally {
         setLoading(false)
       }

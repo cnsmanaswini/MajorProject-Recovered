@@ -1,173 +1,122 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Heart, MessageCircle, Play, Layers, X, ChevronLeft, ChevronRight,
-  Bookmark, Search, Flame, UserPlus, Sparkles,
+  Bookmark, Search, Flame,
 } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
 
-// ---- Mock data (stand-in for GET /api/feed/explore) ----------------------
-const AVATAR = (seed) => `https://i.pravatar.cc/150?u=${seed}`;
-const PHOTO = (seed, w = 600, h = 600) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
+// ---------------------------------------------------------------------------
+// This page is now wired to the real backend:
+//   GET /api/feed/explore  → real posts (public accounts, last 14 days)
+//   GET /api/feed/trending → real trending topics
+// Captions come from post.content. No mock data, no fabricated engagement.
+// ---------------------------------------------------------------------------
 
-const CATEGORIES = [
-  { id: "for_you", label: "For You" },
-  { id: "technology", label: "Technology" },
-  { id: "fashion", label: "Fashion" },
-  { id: "food", label: "Food" },
-  { id: "sports", label: "Sports" },
-  { id: "travel", label: "Travel" },
-  { id: "music", label: "Music" },
-  { id: "gaming", label: "Gaming" },
-];
-
-// Rough per-category emotional tone, used by the recommendation blender.
-// Positive values = generally uplifting/calm content, negative = higher arousal/heavier content.
-const CATEGORY_TONE = {
-  technology: 0.1,
-  fashion: 0.3,
-  food: 0.5,
-  sports: -0.1,
-  travel: 0.6,
-  music: 0.2,
-  gaming: -0.2,
-  for_you: 0,
-};
-
-const USERNAMES = [
-  "wildframes", "citylightsco", "matcha.daily", "studio.forma", "trailmix_av",
-  "paperandpine", "neon.archive", "quietcoast", "graincollective", "duskrunner",
-  "clay.and.co", "farfieldstudio", "moonlitmesa", "saltandcedar", "afterglow.lab",
-];
-
-const HASHTAGS_BY_CATEGORY = {
-  technology: ["#airesearch", "#gadgets", "#devtools", "#robotics"],
-  fashion: ["#streetstyle", "#ootd", "#runway", "#thrifted"],
-  food: ["#homecooking", "#foodie", "#bakingday", "#streetfood"],
-  sports: ["#matchday", "#training", "#courtside", "#trailrun"],
-  travel: ["#offthegrid", "#roadtrip", "#citywalks", "#slowtravel"],
-  music: ["#studiosession", "#vinylclub", "#livesound", "#newrelease"],
-  gaming: ["#speedrun", "#indiegames", "#patchnotes", "#coop"],
-};
-
-function makeMockPosts(count, offset = 0) {
-  const categories = Object.keys(HASHTAGS_BY_CATEGORY);
-  return Array.from({ length: count }).map((_, i) => {
-    const n = offset + i;
-    const isReel = n % 5 === 0;
-    const isCarousel = !isReel && n % 7 === 0;
-    const seed = `mg-${n}`;
-    const category = categories[n % categories.length];
-    const tags = HASHTAGS_BY_CATEGORY[category];
-    // Deterministic pseudo-random signals so the mock behaves consistently across reloads.
-    const rand = (k) => {
-      const x = Math.sin(n * 999 + k) * 10000;
-      return x - Math.floor(x);
-    };
-    return {
-      id: n + 1,
-      is_reel: isReel,
-      category,
-      hashtag: tags[n % tags.length],
-      author: {
-        username: USERNAMES[n % USERNAMES.length],
-        avatar_url: AVATAR(seed),
-      },
-      caption: "Exploring textures and light on a slow afternoon.",
-      likes_count: Math.floor(400 + rand(1) * 48000),
-      comments_count: Math.floor(2 + rand(2) * 900),
-      shares_count: Math.floor(rand(3) * 3000),
-      // engagement_velocity approximates "likes gained in the last hour" for trending detection
-      engagement_velocity: rand(4),
-      // sentiment_score: -1 (heavy/negative) .. +1 (uplifting), as produced by the AI pipeline
-      sentiment_score: Math.max(-1, Math.min(1, CATEGORY_TONE[category] + (rand(5) - 0.5) * 0.6)),
-      media: isCarousel
-        ? [
-            { media_type: "image", url: PHOTO(seed + "-a", 900, 1125) },
-            { media_type: "image", url: PHOTO(seed + "-b", 900, 1125) },
-          ]
-        : [
-            {
-              media_type: isReel ? "video" : "image",
-              url: PHOTO(seed, 900, isReel ? 1600 : 1125),
-              thumbnail_url: PHOTO(seed, 900, isReel ? 1600 : 1125),
-            },
-          ],
-    };
-  });
-}
-
-function makeSuggestedAccounts(count) {
-  return Array.from({ length: count }).map((_, i) => {
-    const username = USERNAMES[(i * 3) % USERNAMES.length];
-    return {
-      username,
-      avatar_url: AVATAR(`acct-${username}-${i}`),
-      mutuals: Math.floor(1 + Math.random() * 12),
-      followed: false,
-    };
-  });
-}
-
-const WIDE_POSITIONS = new Set([3, 10]);
 const PAGE_SIZE = 30;
-const TRENDING_VELOCITY_THRESHOLD = 0.85;
+const WIDE_POSITIONS = new Set([3, 10]);
+const FALLBACK_AVATAR = (seed) => `https://i.pravatar.cc/150?u=${seed}`;
 
 function formatCount(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+  const v = n ?? 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
 }
 
-// ---------------------------------------------------------------------------
-// Recommendation engine (mock of what a real backend endpoint would compute).
-//
-// score = interestMatch * 0.5 + engagement * 0.3 + trending * 0.2
-// Then a "wellbeing" pass gently re-orders results so that a long run of
-// heavy/negative-sentiment content doesn't stack up back-to-back — instead of
-// hard-filtering anything, it interleaves calmer posts in to keep the shift
-// in tone gradual rather than abrupt.
-// ---------------------------------------------------------------------------
-function scorePost(post, userInterests) {
-  const interestWeight = userInterests[post.category] ?? 0.2;
-  const engagement = Math.min(1, (post.likes_count + post.comments_count * 3) / 50000);
-  const trending = post.engagement_velocity > TRENDING_VELOCITY_THRESHOLD ? 1 : post.engagement_velocity;
-  return interestWeight * 0.5 + engagement * 0.3 + trending * 0.2;
-}
-
-function rankWithSentimentSmoothing(posts, userInterests, recentMoodTrend) {
-  const scored = posts
-    .map((p) => ({ post: p, score: scorePost(p, userInterests) }))
-    .sort((a, b) => b.score - a.score);
-
-  // recentMoodTrend: running average of sentiment_score already shown, -1..1.
-  // If it's drifted heavy/negative, bias the next picks slightly toward calmer posts
-  // instead of a hard cutoff, so the feed eases back rather than snapping.
-  const result = [];
-  let mood = recentMoodTrend;
-  const pool = [...scored];
-
-  while (pool.length) {
-    let pickIdx = 0;
-    if (mood < -0.15) {
-      // find the best-scoring post among the calmer half of what's left
-      const calmCandidates = pool
-        .map((item, idx) => ({ idx, item }))
-        .filter(({ item }) => item.post.sentiment_score >= -0.1)
-        .sort((a, b) => b.item.score - a.item.score);
-      if (calmCandidates.length) pickIdx = calmCandidates[0].idx;
-    }
-    const [chosen] = pool.splice(pickIdx, 1);
-    result.push(chosen.post);
-    mood = mood * 0.85 + chosen.post.sentiment_score * 0.15;
+// Same pattern FeedPage.jsx uses: prefer the media[] array, fall back to
+// the legacy single image_url/video_url columns.
+function getPostMedia(post) {
+  if (post.media?.length) {
+    return [...post.media].sort((a, b) => (a.position || 0) - (b.position || 0));
   }
-  return result;
+  if (post.image_url) return [{ id: "legacy-image", media_type: "image", url: post.image_url }];
+  if (post.video_url) return [{ id: "legacy-video", media_type: "video", url: post.video_url }];
+  return [];
+}
+
+// post.topics is real (hashtags + soft tags, set server-side). Fall back to
+// pulling #hashtags out of the caption itself if topics is empty.
+function getHashtags(post) {
+  if (post.topics?.length) {
+    return post.topics.map((t) => (t.startsWith("#") ? t : `#${t}`));
+  }
+  return (post.content || "").match(/#\w+/g) || [];
+}
+
+// post.emotion is a real field from the backend pipeline (CLIP for media,
+// text classifier for captions) — this just maps it to something visible.
+// Not every possible label is guaranteed here; unknown ones fall back to a
+// plain dot so the badge never looks broken.
+const EMOTION_EMOJI = {
+  joy: "😄", excitement: "🤩", pride: "🥲", calm: "😌", love: "🥰",
+  surprise: "😮", neutral: "😐", sadness: "😔", tiredness: "🥱",
+  frustration: "😤", stress: "😩", anger: "😠", fear: "😨", disgust: "😖",
+};
+
+function EmotionBadge({ emotion, sarcasm }) {
+  if (!emotion) return null;
+  const emoji = EMOTION_EMOJI[emotion.toLowerCase()] || "•";
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="text-xs bg-neutral-800 text-neutral-200 px-2 py-0.5 rounded-full capitalize">
+        {emoji} {emotion}
+      </span>
+      {sarcasm && (
+        <span className="text-xs bg-neutral-800 text-amber-300 px-2 py-0.5 rounded-full">
+          😏 sarcastic
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Reliable video-thumbnail rendering: the `#t=0.5` URL-fragment trick only
+// half-works across browsers (Chrome sometimes honors it, Firefox mostly
+// doesn't without playback). This instead seeks the actual <video> element
+// once its metadata is ready, which every browser paints correctly.
+function VideoThumbnail({ src, className }) {
+  const videoRef = useRef(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const seekToFrame = () => {
+      try {
+        v.currentTime = Math.min(0.5, (v.duration || 1) / 4);
+      } catch {
+        // duration not available yet on some browsers; onloadeddata below covers it
+      }
+    };
+    const onSeeked = () => setReady(true);
+    v.addEventListener("loadedmetadata", seekToFrame);
+    v.addEventListener("loadeddata", seekToFrame);
+    v.addEventListener("seeked", onSeeked);
+    return () => {
+      v.removeEventListener("loadedmetadata", seekToFrame);
+      v.removeEventListener("loadeddata", seekToFrame);
+      v.removeEventListener("seeked", onSeeked);
+    };
+  }, [src]);
+
+  return (
+    <video
+      ref={videoRef}
+      src={src}
+      muted
+      playsInline
+      preload="auto"
+      className={className}
+      style={{ opacity: ready ? 1 : 0, transition: "opacity 150ms ease", backgroundColor: "#171717" }}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
 // UI pieces
 // ---------------------------------------------------------------------------
 
-function SearchBar({ value, onChange, suggestions, onPick }) {
-  const [focused, setFocused] = useState(false);
+function SearchBar({ value, onChange }) {
   return (
     <div className="relative px-1 pt-1">
       <div className="flex items-center gap-2 bg-neutral-900 rounded-lg px-3 py-2">
@@ -175,9 +124,7 @@ function SearchBar({ value, onChange, suggestions, onPick }) {
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 120)}
-          placeholder="Search accounts, hashtags, topics"
+          placeholder="Search captions, usernames, hashtags"
           className="bg-transparent outline-none text-sm text-white placeholder-neutral-500 w-full"
         />
         {value && (
@@ -186,102 +133,41 @@ function SearchBar({ value, onChange, suggestions, onPick }) {
           </button>
         )}
       </div>
-
-      {focused && value && suggestions.length > 0 && (
-        <div className="absolute z-20 left-1 right-1 mt-1 bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden">
-          {suggestions.map((s) => (
-            <button
-              key={s.type + s.label}
-              onMouseDown={() => onPick(s)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-800"
-            >
-              {s.type === "hashtag" ? (
-                <span className="text-neutral-500">#</span>
-              ) : (
-                <img src={AVATAR(s.label)} alt="" className="w-5 h-5 rounded-full object-cover" />
-              )}
-              <span>{s.type === "hashtag" ? s.label.replace("#", "") : s.label}</span>
-              <span className="ml-auto text-xs text-neutral-500">{s.type}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-function CategoryChips({ categories, active, onSelect }) {
+function CategoryChips({ chips, active, onSelect }) {
+  if (chips.length <= 1) return null; // nothing but "For You" to show yet
   return (
     <div className="flex gap-2 px-1 py-3 overflow-x-auto no-scrollbar">
-      {categories.map((c) => (
+      {chips.map((c) => (
         <button
-          key={c.id}
-          onClick={() => onSelect(c.id)}
+          key={c}
+          onClick={() => onSelect(c)}
           className={`shrink-0 px-3 py-1.5 rounded-full text-sm border transition-colors ${
-            active === c.id
+            active === c
               ? "bg-white text-black border-white"
               : "bg-transparent text-neutral-300 border-neutral-700 hover:border-neutral-500"
           }`}
         >
-          {c.label}
+          {c === "for_you" ? "For You" : c}
         </button>
       ))}
     </div>
   );
 }
 
-function SuggestedAccountsRow({ accounts, onToggleFollow }) {
-  if (!accounts.length) return null;
-  return (
-    <div className="px-1 pb-3">
-      <div className="flex items-center gap-1.5 px-1 pb-2 text-sm text-neutral-300">
-        <UserPlus className="w-3.5 h-3.5" />
-        <span>Suggested for you</span>
-      </div>
-      <div className="flex gap-3 overflow-x-auto no-scrollbar px-1">
-        {accounts.map((a) => (
-          <div key={a.username} className="shrink-0 w-28 bg-neutral-900 rounded-lg p-3 flex flex-col items-center text-center">
-            <img src={a.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover mb-2" />
-            <span className="text-xs text-white font-medium truncate w-full">{a.username}</span>
-            <span className="text-[11px] text-neutral-500 mb-2">{a.mutuals} mutuals</span>
-            <button
-              onClick={() => onToggleFollow(a.username)}
-              className={`text-xs w-full py-1 rounded-md font-medium ${
-                a.followed ? "bg-neutral-800 text-neutral-300" : "bg-blue-600 text-white"
-              }`}
-            >
-              {a.followed ? "Following" : "Follow"}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TrendingHashtagsRow({ posts }) {
-  const trending = useMemo(() => {
-    const counts = {};
-    posts.forEach((p) => {
-      if (p.engagement_velocity > TRENDING_VELOCITY_THRESHOLD) {
-        counts[p.hashtag] = (counts[p.hashtag] || 0) + 1;
-      }
-    });
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([tag]) => tag);
-  }, [posts]);
-
-  if (!trending.length) return null;
+function TrendingHashtagsRow({ topics }) {
+  if (!topics.length) return null;
   return (
     <div className="px-2 pb-3 flex items-center gap-2 flex-wrap">
       <span className="flex items-center gap-1 text-xs text-orange-400 font-medium">
         <Flame className="w-3.5 h-3.5" /> Trending
       </span>
-      {trending.map((tag) => (
-        <span key={tag} className="text-xs text-neutral-300 bg-neutral-900 px-2 py-1 rounded-full">
-          {tag}
+      {topics.map((t) => (
+        <span key={t.topic} className="text-xs text-neutral-300 bg-neutral-900 px-2 py-1 rounded-full">
+          {t.topic}
         </span>
       ))}
     </div>
@@ -290,10 +176,9 @@ function TrendingHashtagsRow({ posts }) {
 
 function ExploreTile({ post, wide, onOpen }) {
   const [hovered, setHovered] = useState(false);
-  const media = post.media[0];
+  const media = getPostMedia(post)[0];
+  if (!media) return null; // skip text-only posts in the grid
   const isVideo = media.media_type === "video" || post.is_reel;
-  const multi = post.media.length > 1;
-  const isTrending = post.engagement_velocity > TRENDING_VELOCITY_THRESHOLD;
 
   return (
     <button
@@ -304,33 +189,44 @@ function ExploreTile({ post, wide, onOpen }) {
       className={`relative overflow-hidden bg-neutral-900 ${wide ? "col-span-2 row-span-2" : ""}`}
       style={{ aspectRatio: "1 / 1" }}
     >
-      <img
-        src={media.thumbnail_url || media.url}
-        alt=""
-        loading="lazy"
-        className="w-full h-full object-cover"
-        style={{ transform: hovered ? "scale(1.03)" : "scale(1)", transition: "transform 200ms ease" }}
-      />
+      {isVideo ? (
+        <VideoThumbnail
+          src={media.url}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <img
+          src={media.url}
+          alt={post.content ? post.content.slice(0, 80) : ""}
+          loading="lazy"
+          className="w-full h-full object-cover"
+          style={{ transform: hovered ? "scale(1.03)" : "scale(1)", transition: "transform 200ms ease" }}
+        />
+      )}
 
-      {isTrending && (
-        <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/60 text-orange-400 text-[11px] px-1.5 py-0.5 rounded">
-          <Flame className="w-3 h-3" />
+      {isVideo && (
+        <div className="absolute top-2 right-2 text-white" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))" }}>
+          <Play className="w-4 h-4 fill-white" />
+        </div>
+      )}
+      {getPostMedia(post).length > 1 && (
+        <div className="absolute top-2 left-2 text-white" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))" }}>
+          <Layers className="w-4 h-4 fill-white" />
         </div>
       )}
 
-      {(isVideo || multi) && (
-        <div className="absolute top-2 right-2 text-white" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))" }}>
-          {isVideo ? <Play className="w-4 h-4 fill-white" /> : <Layers className="w-4 h-4 fill-white" />}
-        </div>
+      {post.emotion && (
+        <span
+          className="absolute bottom-1.5 left-1.5 text-[11px]"
+          style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" }}
+        >
+          {EMOTION_EMOJI[post.emotion.toLowerCase()] || "•"}
+        </span>
       )}
 
       <div
         className="absolute inset-0 flex items-center justify-center gap-6 text-white font-semibold"
-        style={{
-          background: "rgba(0,0,0,0.3)",
-          opacity: hovered ? 1 : 0,
-          transition: "opacity 120ms ease",
-        }}
+        style={{ background: "rgba(0,0,0,0.3)", opacity: hovered ? 1 : 0, transition: "opacity 120ms ease" }}
       >
         <span className="flex items-center gap-1.5 text-sm">
           <Heart className="w-4 h-4 fill-white" />
@@ -346,29 +242,32 @@ function ExploreTile({ post, wide, onOpen }) {
 }
 
 function ReelsRow({ posts, onOpen }) {
-  const reels = posts.filter((p) => p.is_reel).slice(0, 10);
+  const reels = posts.filter((p) => p.is_reel && getPostMedia(p).length).slice(0, 10);
   if (!reels.length) return null;
   return (
     <div className="px-1 pb-3">
       <div className="flex items-center gap-1.5 px-1 pb-2 text-sm text-neutral-300">
         <Play className="w-3.5 h-3.5 fill-neutral-300" />
-        <span>Reels for you</span>
+        <span>Reels</span>
       </div>
       <div className="flex gap-2 overflow-x-auto no-scrollbar px-1">
-        {reels.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => onOpen(r)}
-            className="relative shrink-0 rounded-lg overflow-hidden bg-neutral-900"
-            style={{ width: 110, aspectRatio: "9 / 16" }}
-          >
-            <img src={r.media[0].thumbnail_url} alt="" className="w-full h-full object-cover" />
-            <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 text-white text-[11px]" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" }}>
-              <Play className="w-3 h-3 fill-white" />
-              {formatCount(r.likes_count)}
-            </div>
-          </button>
-        ))}
+        {reels.map((r) => {
+          const media = getPostMedia(r)[0];
+          return (
+            <button
+              key={r.id}
+              onClick={() => onOpen(r)}
+              className="relative shrink-0 rounded-lg overflow-hidden bg-neutral-900"
+              style={{ width: 110, aspectRatio: "9 / 16" }}
+            >
+              <VideoThumbnail src={media.url} className="w-full h-full object-cover" />
+              <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 text-white text-[11px]" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" }}>
+                <Play className="w-3 h-3 fill-white" />
+                {formatCount(r.likes_count)}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -376,8 +275,9 @@ function ReelsRow({ posts, onOpen }) {
 
 function Lightbox({ posts, index, onClose, onNavigate }) {
   const post = posts[index];
-  const media = post.media[0];
-  const isVideo = media.media_type === "video" || post.is_reel;
+  const media = getPostMedia(post)[0];
+  const author = post.author || {};
+  const isVideo = media?.media_type === "video" || post.is_reel;
 
   useEffect(() => {
     const onKey = (e) => {
@@ -397,59 +297,46 @@ function Lightbox({ posts, index, onClose, onNavigate }) {
   const hasNext = index < posts.length - 1;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.92)" }}
-      onClick={onClose}
-    >
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 text-white/80 hover:text-white p-2"
-        aria-label="Close"
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.92)" }} onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white p-2" aria-label="Close">
         <X className="w-6 h-6" />
       </button>
 
       {hasPrev && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onNavigate(-1); }}
-          className="absolute left-2 sm:left-6 text-white/70 hover:text-white p-2"
-          aria-label="Previous"
-        >
+        <button onClick={(e) => { e.stopPropagation(); onNavigate(-1); }} className="absolute left-2 sm:left-6 text-white/70 hover:text-white p-2" aria-label="Previous">
           <ChevronLeft className="w-8 h-8" />
         </button>
       )}
       {hasNext && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onNavigate(1); }}
-          className="absolute right-2 sm:right-6 text-white/70 hover:text-white p-2"
-          aria-label="Next"
-        >
+        <button onClick={(e) => { e.stopPropagation(); onNavigate(1); }} className="absolute right-2 sm:right-6 text-white/70 hover:text-white p-2" aria-label="Next">
           <ChevronRight className="w-8 h-8" />
         </button>
       )}
 
-      <div
-        className="bg-black w-full max-w-4xl mx-4 max-h-[88vh] flex flex-col sm:flex-row overflow-hidden rounded-sm border border-neutral-800"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="bg-black w-full max-w-4xl mx-4 max-h-[88vh] flex flex-col sm:flex-row overflow-hidden rounded-sm border border-neutral-800" onClick={(e) => e.stopPropagation()}>
         <div className="bg-black flex items-center justify-center sm:w-[62%] max-h-[50vh] sm:max-h-[88vh]">
-          <img src={media.url} alt="" className="max-h-[50vh] sm:max-h-[88vh] w-full object-contain" />
+          {isVideo ? (
+            <video src={media.url} controls className="max-h-[50vh] sm:max-h-[88vh] w-full object-contain" />
+          ) : (
+            <img src={media?.url} alt="" className="max-h-[50vh] sm:max-h-[88vh] w-full object-contain" />
+          )}
         </div>
 
         <div className="sm:w-[38%] flex flex-col text-white">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800">
-            <img src={post.author.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
-            <span className="font-semibold text-sm">{post.author.username}</span>
-            <span className="ml-auto text-xs text-neutral-500">{post.hashtag}</span>
+            <img src={author.avatar_url || FALLBACK_AVATAR(author.username || post.user_id)} alt="" className="w-8 h-8 rounded-full object-cover" />
+            <span className="font-semibold text-sm">{author.username || "unknown"}</span>
+            <span className="ml-auto">
+              <EmotionBadge emotion={post.emotion} sarcasm={post.sarcasm} />
+            </span>
           </div>
 
           <div className="flex-1 px-4 py-3 overflow-y-auto">
             <div className="flex gap-3 text-sm">
-              <img src={post.author.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+              <img src={author.avatar_url || FALLBACK_AVATAR(author.username || post.user_id)} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
               <p>
-                <span className="font-semibold mr-1.5">{post.author.username}</span>
-                {post.caption}
+                <span className="font-semibold mr-1.5">{author.username || "unknown"}</span>
+                {post.content || <span className="text-neutral-500">No caption</span>}
               </p>
             </div>
           </div>
@@ -468,50 +355,74 @@ function Lightbox({ posts, index, onClose, onNavigate }) {
   );
 }
 
-export default function InstagramExploreRecreation() {
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export default function ExplorePage() {
+  const { api } = useAuth();
+
   const [allPosts, setAllPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
-  const [activeCategory, setActiveCategory] = useState("for_you");
+  const [activeTopic, setActiveTopic] = useState("for_you");
   const [query, setQuery] = useState("");
-  const [suggestedAccounts, setSuggestedAccounts] = useState([]);
+  const [trending, setTrending] = useState([]);
+
   const sentinelRef = useRef(null);
   const offsetRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
-  // Stand-in for the user's interest profile, as computed from likes / saves /
-  // comments / accounts followed / watch history by the recommendation service.
-  const [userInterests] = useState({
-    technology: 0.9,
-    music: 0.6,
-    travel: 0.5,
-    food: 0.4,
-    fashion: 0.3,
-    gaming: 0.3,
-    sports: 0.2,
-    for_you: 0.5,
-  });
-  // Running sentiment average of what's already been shown this session — feeds
-  // the smoothing pass so a spike of heavier content doesn't compound.
-  const moodTrendRef = useRef(0);
+  const fetchPage = useCallback(async (offset) => {
+    const res = await api.get("/feed/explore", { params: { limit: PAGE_SIZE, offset } });
+    return res.data;
+  }, [api]);
 
+  // Initial load
   useEffect(() => {
-    const t = setTimeout(() => {
-      const initial = makeMockPosts(PAGE_SIZE, 0);
-      offsetRef.current = PAGE_SIZE;
-      setAllPosts(initial);
-      setSuggestedAccounts(makeSuggestedAccounts(8));
-      setLoading(false);
-    }, 500);
-    return () => clearTimeout(t);
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [posts, trendingRes] = await Promise.all([
+          fetchPage(0),
+          api.get("/feed/trending", { params: { limit: 8 } }).catch(() => ({ data: [] })),
+        ]);
+        if (cancelled) return;
+        offsetRef.current = posts.length;
+        setAllPosts(posts);
+        setTrending(trendingRes.data || []);
+        setHasMore(posts.length === PAGE_SIZE);
+      } catch (err) {
+        if (!cancelled) setError("Couldn't load explore right now. Pull to refresh in a bit.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fetchPage, api]);
 
-  const loadMore = useCallback(() => {
-    setAllPosts((prev) => {
-      const next = makeMockPosts(12, offsetRef.current);
-      offsetRef.current += 12;
-      return [...prev, ...next];
-    });
-  }, []);
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const next = await fetchPage(offsetRef.current);
+      offsetRef.current += next.length;
+      setAllPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...next.filter((p) => !seen.has(p.id))];
+      });
+      setHasMore(next.length === PAGE_SIZE);
+    } catch {
+      // leave hasMore as-is; the sentinel will just retry on next intersect
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [fetchPage, hasMore]);
 
   useEffect(() => {
     const node = sentinelRef.current;
@@ -524,40 +435,29 @@ export default function InstagramExploreRecreation() {
     return () => observer.disconnect();
   }, [loading, loadMore]);
 
-  // Filter by category, then rank with the recommendation + sentiment-smoothing engine.
-  const rankedPosts = useMemo(() => {
-    const filtered =
-      activeCategory === "for_you" ? allPosts : allPosts.filter((p) => p.category === activeCategory);
-    const ranked = rankWithSentimentSmoothing(filtered, userInterests, moodTrendRef.current);
-    if (ranked.length) {
-      const recent = ranked.slice(0, 10);
-      moodTrendRef.current = recent.reduce((s, p) => s + p.sentiment_score, 0) / recent.length;
-    }
-    return ranked;
-  }, [allPosts, activeCategory, userInterests]);
+  // Real category chips, built from hashtags actually present in loaded posts.
+  const topicChips = useMemo(() => {
+    const counts = {};
+    allPosts.forEach((p) => getHashtags(p).forEach((h) => { counts[h] = (counts[h] || 0) + 1; }));
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 7).map(([h]) => h);
+    return ["for_you", ...top];
+  }, [allPosts]);
 
-  const searchSuggestions = useMemo(() => {
-    if (!query.trim()) return [];
-    const q = query.trim().toLowerCase();
-    const tagMatches = Array.from(
-      new Set(allPosts.map((p) => p.hashtag).filter((h) => h.toLowerCase().includes(q)))
-    )
-      .slice(0, 4)
-      .map((label) => ({ type: "hashtag", label }));
-    const accountMatches = Array.from(new Set(allPosts.map((p) => p.author.username)))
-      .filter((u) => u.toLowerCase().includes(q))
-      .slice(0, 4)
-      .map((label) => ({ type: "account", label }));
-    return [...accountMatches, ...tagMatches];
-  }, [query, allPosts]);
+  const topicFiltered = useMemo(() => {
+    if (activeTopic === "for_you") return allPosts;
+    return allPosts.filter((p) => getHashtags(p).includes(activeTopic));
+  }, [allPosts, activeTopic]);
 
   const displayedPosts = useMemo(() => {
-    if (!query.trim()) return rankedPosts;
+    if (!query.trim()) return topicFiltered;
     const q = query.trim().toLowerCase();
-    return rankedPosts.filter(
-      (p) => p.author.username.toLowerCase().includes(q) || p.hashtag.toLowerCase().includes(q)
+    return topicFiltered.filter(
+      (p) =>
+        (p.author?.username || "").toLowerCase().includes(q) ||
+        (p.content || "").toLowerCase().includes(q) ||
+        getHashtags(p).some((h) => h.toLowerCase().includes(q))
     );
-  }, [rankedPosts, query]);
+  }, [topicFiltered, query]);
 
   const openAt = (post) => {
     const idx = displayedPosts.findIndex((p) => p.id === post.id);
@@ -574,35 +474,22 @@ export default function InstagramExploreRecreation() {
     });
   };
 
-  const toggleFollow = (username) => {
-    setSuggestedAccounts((prev) =>
-      prev.map((a) => (a.username === username ? { ...a, followed: !a.followed } : a))
-    );
-  };
-
   return (
     <div className="min-h-screen" style={{ background: "#000" }}>
       <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
       <div className="max-w-4xl mx-auto px-1 py-3">
-        <SearchBar
-          value={query}
-          onChange={setQuery}
-          suggestions={searchSuggestions}
-          onPick={(s) => setQuery(s.type === "hashtag" ? s.label : s.label)}
-        />
-
-        <CategoryChips categories={CATEGORIES} active={activeCategory} onSelect={setActiveCategory} />
+        <SearchBar value={query} onChange={setQuery} />
+        <CategoryChips chips={topicChips} active={activeTopic} onSelect={setActiveTopic} />
 
         {!loading && !query && (
           <>
-            <TrendingHashtagsRow posts={rankedPosts} />
-            <SuggestedAccountsRow accounts={suggestedAccounts} onToggleFollow={toggleFollow} />
-            <ReelsRow posts={rankedPosts} onOpen={openAt} />
-            <div className="flex items-center gap-1.5 px-2 pb-2 text-xs text-neutral-500">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Recommended for you, eased to your recent mood</span>
-            </div>
+            <TrendingHashtagsRow topics={trending} />
+            <ReelsRow posts={topicFiltered} onOpen={openAt} />
           </>
+        )}
+
+        {error && (
+          <div className="text-center text-red-400 text-sm py-8">{error}</div>
         )}
 
         {loading ? (
@@ -616,7 +503,9 @@ export default function InstagramExploreRecreation() {
             ))}
           </div>
         ) : displayedPosts.length === 0 ? (
-          <div className="text-center text-neutral-500 text-sm py-16">No results for "{query}"</div>
+          <div className="text-center text-neutral-500 text-sm py-16">
+            {query ? `No results for "${query}"` : "No posts to explore yet."}
+          </div>
         ) : (
           <div className="grid grid-cols-3 gap-1" style={{ gridAutoFlow: "dense" }}>
             {displayedPosts.map((post, idx) => (
@@ -624,16 +513,15 @@ export default function InstagramExploreRecreation() {
             ))}
           </div>
         )}
+
+        {loadingMore && (
+          <div className="text-center text-neutral-500 text-xs py-4">Loading more…</div>
+        )}
         <div ref={sentinelRef} className="h-1" />
       </div>
 
       {lightboxIndex !== null && (
-        <Lightbox
-          posts={displayedPosts}
-          index={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-          onNavigate={navigate}
-        />
+        <Lightbox posts={displayedPosts} index={lightboxIndex} onClose={() => setLightboxIndex(null)} onNavigate={navigate} />
       )}
     </div>
   );

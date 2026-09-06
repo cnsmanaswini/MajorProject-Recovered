@@ -14,12 +14,12 @@ int, and you get a 422 instead of ever reaching the real handler.
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, exists
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 
 from models.database import get_db
-from models.models import Post, User, Story
+from models.models import Post, User, Story, PostMedia
 from schemas.schemas import PostOut
 from routers.auth import get_current_user, get_optional_user
 from services.algorithm import build_feed, attach_like_status, get_trending_topics
@@ -80,7 +80,7 @@ async def get_explore(
     result = await db.execute(
         select(Post)
         .join(User, User.id == Post.user_id)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(
             Post.created_at >= cutoff,
             User.is_private == False,
@@ -99,6 +99,11 @@ async def get_explore(
     # Load authors
     for p in posts:
         p.author = await db.get(User, p.user_id)
+        if not (p.video_url or "").strip() and p.media:
+            for m in p.media:
+                if m.media_type == "video" and m.url:
+                    p.video_url = m.url
+                    break
 
     if current_user:
         await attach_like_status(posts, current_user.id, db)
@@ -117,13 +122,22 @@ async def get_reels(
     Only reels are returned.
     """
 
-    cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = datetime.utcnow() - timedelta(days=365)
+
+    has_video_media = exists().where(
+        PostMedia.post_id == Post.id,
+        PostMedia.media_type == "video",
+    )
 
     result = await db.execute(
         select(Post)
-        .options(selectinload(Post.media))
+        .options(selectinload(Post.media), selectinload(Post.author))
         .where(
-            Post.is_reel == True,
+            or_(
+                Post.is_reel == True,  # noqa: E712
+                Post.video_url != "",
+                has_video_media,
+            ),
             Post.created_at >= cutoff,
         )
         .order_by(Post.feed_score.desc())
@@ -134,6 +148,11 @@ async def get_reels(
 
     for p in posts:
         p.author = await db.get(User, p.user_id)
+        if not (p.video_url or "").strip() and p.media:
+            for m in p.media:
+                if m.media_type == "video" and m.url:
+                    p.video_url = m.url
+                    break
     if current_user:
         await attach_like_status(posts, current_user.id, db)
     return posts

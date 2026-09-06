@@ -183,6 +183,9 @@ class Comment(Base):
 
     post = relationship("Post", back_populates="comments")
     user = relationship("User")
+    @property
+    def author(self):
+        return self.user
 
 
 class Like(Base):
@@ -194,6 +197,9 @@ class Like(Base):
 
     post = relationship("Post", back_populates="likes")
     user = relationship("User")
+    @property
+    def author(self):
+        return self.user
 
 
 class Message(Base):

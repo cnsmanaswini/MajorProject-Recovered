@@ -93,30 +93,9 @@ async def list_users(db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.get("/{user_id}")
-async def get_user_by_id(
-    user_id: int,
-    current_user: Optional[User] = Depends(get_optional_user),
-    db: AsyncSession = Depends(get_db),
-):
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return {
-        "id": user.id,
-        "username": user.username,
-        "display_name": user.display_name,
-        "avatar_url": user.avatar_url,
-        "bio": user.bio,
-        "followers_count": user.followers_count,
-        "following_count": user.following_count,
-        "posts_count": user.posts_count,
-        "is_private": user.is_private,
-    }
-
-
-# ── Get Profile ───────────────────────────────────────────────
+# Static paths MUST be registered before /{username_or_id}.
+# Otherwise GET /users/me and /users/search are caught by the int path,
+# FastAPI returns 422, and the profile page shows "User not found".
 
 @router.get("/search")
 async def search_users(
@@ -166,17 +145,21 @@ async def get_my_profile(
     }
 
 
-@router.get("/{username}")
+@router.get("/{username_or_id}")
 async def get_profile(
-    username: str,
-    current_user: Optional[User] = Depends(get_current_user),
+    username_or_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a user's public profile."""
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
-    user = result.scalar_one_or_none()
+    """Get a user's public profile by username or numeric id."""
+    user = None
+    if username_or_id.isdigit():
+        user = await db.get(User, int(username_or_id))
+    if user is None:
+        result = await db.execute(
+            select(User).where(User.username == username_or_id)
+        )
+        user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
