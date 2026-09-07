@@ -1,7 +1,7 @@
 import React from 'react'
 import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom'
 import {
-  Home, Play, MessageCircle, BarChart2, User,
+  Home, MessageCircle, BarChart2, User,
   Brain, Sparkles, Compass, Bell
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -12,7 +12,6 @@ import { useAuth } from './context/AuthContext.jsx'
 import AuthPage from './pages/AuthPage.jsx'
 import FeedPage from './components/Feed/FeedPage.jsx'
 import ExplorePage from './components/Feed/Explorepage.jsx'
-import ReelsPage from './components/Reels/ReelsPage.jsx'
 import MessagesPage from './components/Messages/MessagesPage.jsx'
 import DashboardPage from './components/Dashboard/DashboardPage.jsx'
 import ProfilePage from './components/Profile/ProfilePage.jsx'
@@ -20,7 +19,6 @@ import ProfilePage from './components/Profile/ProfilePage.jsx'
 const NAV_ITEMS = [
   { to: '/',          icon: Home,          label: 'Feed'      },
   { to: '/explore',   icon: Compass,       label: 'Explore'   },
-  { to: '/reels',     icon: Play,          label: 'Reels'     },
   { to: '/messages',  icon: MessageCircle, label: 'Messages'  },
   { to: '/dashboard', icon: BarChart2,     label: 'Insights'  },
   { to: '/profile',   icon: User,          label: 'Profile'   },
@@ -154,9 +152,6 @@ export default function App() {
           } />
           <Route path="/explore" element={
             <Protected><ExplorePage /></Protected>
-          } />
-          <Route path="/reels" element={
-            <Protected><ReelsPage /></Protected>
           } />
           <Route path="/messages" element={
             <Protected><MessagesPage /></Protected>

@@ -1,11 +1,10 @@
 """
 seed_nature_photos.py
 Seeds ~150 real nature photos (Pexels) as posts, each paired with a real
-TweetEval caption. Classification is TEXT-ONLY — media_source is
-deliberately left None, so CLIP/image analysis never runs. A nature
-photo (mountains, forest, ocean...) has no facial expression or scene-
-affect for CLIP to meaningfully read, so the caption alone drives the
-sentiment/emotion/risk output.
+TweetEval caption. Runs the FULL pipeline on every post -- CLIP image
+analysis + OCR, same as a real user posting through the app -- so seeded
+data behaves identically to live posts instead of the caption-only
+shortcut this script used to take.
 
 Emotion output is restricted to 5 labels (joy, sadness, anger, fear,
 neutral) via the EMOTION_LABELS collapse already applied in analyzer.py
@@ -17,6 +16,8 @@ seed_from_pexels.py):
     python seed_nature_photos.py
     python seed_nature_photos.py --count 150
 """
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 import argparse
 import asyncio
@@ -36,7 +37,7 @@ from models.database import AsyncSessionLocal                       # noqa: E402
 from models.models import User, Post, PostMedia, EmotionLog          # noqa: E402
 from ai.pipeline.analyzer import analyze_text                        # noqa: E402
 from services.topic_utils import extract_topics                      # noqa: E402
-from services.cloudinary_service import _save_local                  # noqa: E402
+from services.cloudinary_service import _save_local, UPLOAD_ROOT     # noqa: E402
 from dataset_utils import fetch_captions                             # noqa: E402
 from sqlalchemy import select                                        # noqa: E402
 
@@ -127,11 +128,15 @@ async def seed(count: int):
                 )
                 risk_history = list(reversed(risk_result.scalars().all()))
 
-                # media_source deliberately omitted -- text-only classification,
-                # no CLIP call, per this script's whole purpose.
+                # Real disk path, not the web-servable "/uploads/..." url --
+                # same fix as posts.py, needed so analyze_text's CLIP/OCR
+                # step can actually open the file.
+                media_disk_path = str(UPLOAD_ROOT / saved["url"].removeprefix("/uploads/"))
+
                 pipeline = analyze_text(
                     caption,
                     risk_history,
+                    media_source=media_disk_path,
                     original_content=caption,
                 )
 

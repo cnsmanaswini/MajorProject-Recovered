@@ -149,6 +149,16 @@ export default function ProfilePage() {
       }))
     } catch {}
   }
+  const handleDeletePost = async (postId) => {
+    if (!window.confirm('Delete this post? This cannot be undone.')) return
+    try {
+      await api.delete(`/posts/${postId}`)
+      setPosts(prev => prev.filter(p => p.id !== postId))
+      setSelected(null)
+    } catch (err) {
+      console.error('Failed to delete post', err)
+    }
+  }
 
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0]
@@ -587,12 +597,22 @@ export default function ProfilePage() {
               </button>
             </div>
 
-            <button
-              onClick={() => setSelected(null)}
-              className="btn-ghost w-full text-sm"
-            >
-              Close
-            </button>
+            <div className="flex gap-2">
+              {isOwn && (
+                <button
+                  onClick={() => handleDeletePost(selected.id)}
+                  className="btn-ghost flex-1 text-sm text-red-400 hover:text-red-300"
+                >
+                  Delete
+                </button>
+              )}
+              <button
+                onClick={() => setSelected(null)}
+                className="btn-ghost flex-1 text-sm"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

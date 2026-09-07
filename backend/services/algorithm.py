@@ -44,7 +44,7 @@ logger = logging.getLogger("mindgram.algorithm")
 # ── Constants ─────────────────────────────────────────────────
 
 RECENCY_HALF_LIFE_HOURS = 48.0
-RISK_SUPPRESSION_THRESHOLD = 0.60
+RISK_SUPPRESSION_THRESHOLD = 0.40   # was 0.60
 
 async def attach_like_status(posts, user_id: int, db: AsyncSession):
     """Mutates posts in-place, setting `is_liked` based on whether
@@ -251,19 +251,20 @@ def silent_ai_adjustment(
     adjustment = 0.0
 
     if user_risk >= RISK_SUPPRESSION_THRESHOLD:
-        # Suppress negative/risky content
+        # Suppress high-risk negative content (any emotion, still gated on risk_score
+        # so a "sad" post that isn't actually risky can still get through — that's
+        # the "a bit of sad" you don't want fully wiped out).
         if post.risk_score > 0.5:
             penalty = (post.risk_score - 0.5) * user_risk * 0.5
             adjustment -= penalty
 
-        # Boost positive content
-        if post.sentiment == "positive" and post.risk_score < 0.2:
-            boost = (1.0 - user_risk) * 0.2
+        # Boost calm joy/neutral content specifically (not just "positive sentiment",
+        # which doesn't reliably track the emotion label).
+        if post.emotion in ("joy", "neutral") and post.risk_score < 0.2:
+            boost = user_risk * 0.2
             adjustment += boost
 
     return adjustment
-
-
 # ── Main Ranking Function ─────────────────────────────────────
 
 def compute_rank(

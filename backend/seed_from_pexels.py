@@ -43,6 +43,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 load_dotenv()
+import os
+print("GROQ_API_KEY loaded:", bool(os.getenv("GROQ_API_KEY")))
 
 from ai.pipeline.loader import preload_models                       # noqa: E402
 from models.database import AsyncSessionLocal                       # noqa: E402

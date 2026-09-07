@@ -28,7 +28,8 @@ Notes on --sequence-per-user:
     which is what you want for Phase 4 (showing risk trend + wellness
     injection kicking in over a run of negative posts).
 """
-
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 import argparse
 import asyncio
 import random
@@ -37,6 +38,10 @@ import sys
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ai.pipeline.loader import preload_models

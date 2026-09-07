@@ -22,16 +22,17 @@ import csv
 import statistics
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # adjust if run from elsewhere
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # adjust if run from elsewhere
 
 from ai.pipeline.analyzer import analyze_text
+from ai.pipeline.loader import preload_models
 
 TEXT_COL = "text"
 LABEL_COL = "label"   # 1 = stress, 0 = not stress (per Dreaddit paper)
 
 
 def load_rows(csv_path: str) -> list[dict]:
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     if not rows:
@@ -45,6 +46,7 @@ def load_rows(csv_path: str) -> list[dict]:
 
 
 def main():
+    preload_models()
     if len(sys.argv) < 2:
         print("Usage: python validate_against_dreaddit.py path/to/dreaddit.csv")
         sys.exit(1)

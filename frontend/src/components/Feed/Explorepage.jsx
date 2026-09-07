@@ -241,38 +241,6 @@ function ExploreTile({ post, wide, onOpen }) {
   );
 }
 
-function ReelsRow({ posts, onOpen }) {
-  const reels = posts.filter((p) => p.is_reel && getPostMedia(p).length).slice(0, 10);
-  if (!reels.length) return null;
-  return (
-    <div className="px-1 pb-3">
-      <div className="flex items-center gap-1.5 px-1 pb-2 text-sm text-neutral-300">
-        <Play className="w-3.5 h-3.5 fill-neutral-300" />
-        <span>Reels</span>
-      </div>
-      <div className="flex gap-2 overflow-x-auto no-scrollbar px-1">
-        {reels.map((r) => {
-          const media = getPostMedia(r)[0];
-          return (
-            <button
-              key={r.id}
-              onClick={() => onOpen(r)}
-              className="relative shrink-0 rounded-lg overflow-hidden bg-neutral-900"
-              style={{ width: 110, aspectRatio: "9 / 16" }}
-            >
-              <VideoThumbnail src={media.url} className="w-full h-full object-cover" />
-              <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 text-white text-[11px]" style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" }}>
-                <Play className="w-3 h-3 fill-white" />
-                {formatCount(r.likes_count)}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function Lightbox({ posts, index, onClose, onNavigate }) {
   const post = posts[index];
   const media = getPostMedia(post)[0];
@@ -484,7 +452,6 @@ export default function ExplorePage() {
         {!loading && !query && (
           <>
             <TrendingHashtagsRow topics={trending} />
-            <ReelsRow posts={topicFiltered} onOpen={openAt} />
           </>
         )}
 

@@ -67,3 +67,6 @@ tqdm>=4.66.4
 # ---------- ASGI ----------
 anyio>=4.4.0
 starlette>=0.37.2
+
+# ---------- Groq (LLM arbitration) ----------
+groq>=0.11.0

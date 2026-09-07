@@ -13,6 +13,8 @@ Run from the backend/ folder, AFTER you have posts to comment on:
     python seed_comments.py
     python seed_comments.py --max-per-post 5
 """
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 import argparse
 import asyncio
@@ -20,7 +22,10 @@ import random
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+load_dotenv()
 
 from ai.pipeline.loader import preload_models     # noqa: E402
 from models.database import AsyncSessionLocal      # noqa: E402

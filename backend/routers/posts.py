@@ -5,7 +5,7 @@ GET  /api/posts/{id}     → get post
 DELETE /api/posts/{id}   → delete post
 POST /api/posts/{id}/like → like/unlike post
 """
-from services.cloudinary_service import UPLOAD_ROOT
+from services.cloudinary_service import UPLOAD_ROOT, delete_asset
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -183,7 +183,7 @@ async def create_post(
     pipeline = analyze_text(
         text_to_analyze,
         risk_history,
-        media_source=None,   # ← text-only analysis, media analysis disabled
+        media_source=media_source_for_analysis,   # ← text-only analysis, media analysis disabled
         original_content=content,
     )
 
