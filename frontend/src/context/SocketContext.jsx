@@ -4,8 +4,9 @@ import { useAuth } from './AuthContext'
 const SocketContext = createContext(null)
 
 export function SocketProvider({ children }) {
-  const { user } = useAuth()
+  const { user, api } = useAuth()
   const ws = useRef(null)
+  const reconnectTimer = useRef(null)
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState([])
   const listeners = useRef({})
@@ -13,9 +14,18 @@ export function SocketProvider({ children }) {
   useEffect(() => {
     if (!user) return
 
-    // Connect WebSocket
+    let disposed = false
+
     const connect = () => {
-      ws.current = new WebSocket(`ws://localhost:8000/api/messages/ws/${user.id}`)
+      if (disposed) return
+
+      // Build the WS URL from the current origin so it works behind the
+      // Vite dev proxy, on a LAN device, or in production — not just
+      // localhost:8000.
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const url = `${proto}://${window.location.host}/api/messages/ws/${user.id}`
+
+      ws.current = new WebSocket(url)
 
       ws.current.onopen = () => {
         setIsConnected(true)
@@ -36,8 +46,11 @@ export function SocketProvider({ children }) {
 
       ws.current.onclose = () => {
         setIsConnected(false)
-        // Reconnect after 3 seconds
-        setTimeout(connect, 3000)
+        // Only reconnect while the provider is still mounted and the user
+        // is still logged in — otherwise this loops forever on ws/undefined.
+        if (!disposed && user) {
+          reconnectTimer.current = setTimeout(connect, 3000)
+        }
       }
 
       ws.current.onerror = () => {
@@ -48,6 +61,8 @@ export function SocketProvider({ children }) {
     connect()
 
     return () => {
+      disposed = true
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
       if (ws.current) ws.current.close()
     }
   }, [user])
@@ -58,6 +73,14 @@ export function SocketProvider({ children }) {
         receiver_id: receiverId,
         content,
       }))
+    } else {
+      // REST fallback so the message still goes through when the socket
+      // is down instead of silently dropping it.
+      api.post('/messages', {
+        sender_id: user.id,
+        receiver_id: receiverId,
+        content,
+      }).catch(() => {})
     }
   }
 

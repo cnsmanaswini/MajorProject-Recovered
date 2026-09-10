@@ -140,14 +140,19 @@ export default function ProfilePage() {
 
   const handleFollow = async () => {
     if (!profile) return
+    const prev = profile
+    const nextIsFollowing = !prev.is_following
     try {
       const res = await api.post(`/users/${profile.id}/follow`)
-      setProfile(prev => ({
+      setProfile({
         ...prev,
-        is_following: !prev.is_following,
-        followers_count: res.data.followers_count,
-      }))
-    } catch {}
+        is_following: nextIsFollowing,
+        followers_count: res.data.followers_count ?? prev.followers_count,
+        following_count: res.data.following_count ?? prev.following_count,
+      })
+    } catch {
+      setProfile(prev)
+    }
   }
   const handleDeletePost = async (postId) => {
     if (!window.confirm('Delete this post? This cannot be undone.')) return
@@ -563,11 +568,17 @@ export default function ProfilePage() {
                     <img
                       src={c.user?.avatar_url || `https://api.dicebear.com/9.x/avataaars/svg?seed=${c.user_id}`}
                       alt=""
-                      className="w-7 h-7 rounded-full bg-gray-800 flex-shrink-0"
+                      onClick={() => navigate(`/profile/${c.user?.username || c.user_id}`)}
+                      className="w-7 h-7 rounded-full bg-gray-800 flex-shrink-0 cursor-pointer"
                     />
                     <div className="min-w-0">
                       <p className="text-xs text-gray-200">
-                        <span className="text-white font-medium">{c.user?.username || `user_${c.user_id}`}</span>{' '}
+                        <span
+                          className="text-white font-medium cursor-pointer hover:underline"
+                          onClick={() => navigate(`/profile/${c.user?.username || c.user_id}`)}
+                        >
+                          {c.user?.username || `user_${c.user_id}`}
+                        </span>{' '}
                         {c.content}
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5">

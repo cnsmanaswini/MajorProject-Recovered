@@ -97,6 +97,7 @@ class Post(Base):
     risk_score       = Column(Float, default=0.0)
     feed_score       = Column(Float, default=0.5)
     topics           = Column(JSON, default=list)   # hashtags + soft tags for trending
+    is_wellness      = Column(Boolean, default=False)  # explicit wellness content flag
 
     # Engagement
     likes_count    = Column(Integer, default=0)

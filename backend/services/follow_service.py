@@ -284,10 +284,15 @@ async def get_followers(
 
     followers = result.scalars().all()
 
-    return {
-        "count": len(followers),
-        "followers": followers
-    }
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "display_name": u.display_name,
+            "avatar_url": u.avatar_url,
+        }
+        for u in followers
+    ]
 
 
 # --------------------------------------------------
@@ -310,10 +315,15 @@ async def get_following(
 
     following = result.scalars().all()
 
-    return {
-        "count": len(following),
-        "following": following
-    }
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "display_name": u.display_name,
+            "avatar_url": u.avatar_url,
+        }
+        for u in following
+    ]
 
 
 # --------------------------------------------------

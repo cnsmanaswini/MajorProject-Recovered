@@ -83,7 +83,15 @@ function usePostImpression(postId, userId, enabled = true) {
 
 function PostCard({ post, onLike, onHide, trackImpressions = true }) {
   const { user, api } = useAuth()
+  const navigate = useNavigate()
   const cardRef = usePostImpression(post.id, user?.id, trackImpressions)
+
+  const goToProfile = () => {
+    if (post.author?.username) navigate(`/profile/${post.author.username}`)
+  }
+  const goToCommenter = (c) => {
+    navigate(`/profile/${c.user?.username || c.user_id}`)
+  }
   const [liked, setLiked]           = useState(false)
   const [likeCount, setLikeCount]   = useState(post.likes_count || 0)
   const [showComments, setShowComments] = useState(false)
@@ -193,7 +201,7 @@ function PostCard({ post, onLike, onHide, trackImpressions = true }) {
       {/* Header */}
       <div className="flex items-center justify-between p-4 pb-3">
         <div className="flex items-center gap-3">
-          <div className="story-ring">
+          <div className="story-ring cursor-pointer" onClick={goToProfile}>
             <img
               src={post.author?.avatar_url || `https://api.dicebear.com/9.x/avataaars/svg?seed=${post.author?.username}`}
               alt=""
@@ -203,7 +211,7 @@ function PostCard({ post, onLike, onHide, trackImpressions = true }) {
           <div>
             <p className="font-semibold text-sm text-white">{post.author?.display_name}</p>
             <div className="flex items-center gap-1.5 text-xs text-gray-500">
-              <span>@{post.author?.username}</span>
+              <span className="cursor-pointer hover:text-gray-300 transition-colors" onClick={goToProfile}>@{post.author?.username}</span>
               {post.location && (
                 <>
                   <span>·</span>
@@ -347,7 +355,10 @@ function PostCard({ post, onLike, onHide, trackImpressions = true }) {
       {post.content && (
         <div className="px-4 pb-2">
           <p className="text-sm text-gray-200 leading-relaxed">
-            <span className="font-semibold text-white mr-1.5">
+            <span
+              className="font-semibold text-white mr-1.5 cursor-pointer hover:underline"
+              onClick={goToProfile}
+            >
               {post.author?.username}
             </span>
             {post.content}
@@ -417,10 +428,14 @@ function PostCard({ post, onLike, onHide, trackImpressions = true }) {
                 <img
                   src={c.user?.avatar_url || `https://api.dicebear.com/9.x/avataaars/svg?seed=${c.user_id}`}
                   alt=""
-                  className="w-6 h-6 rounded-full bg-gray-800 flex-shrink-0 mt-0.5"
+                  onClick={() => goToCommenter(c)}
+                  className="w-6 h-6 rounded-full bg-gray-800 flex-shrink-0 mt-0.5 cursor-pointer"
                 />
                 <div className="flex-1 bg-white/5 rounded-xl px-3 py-1.5">
-                  <p className="text-xs text-brand-300 font-medium">
+                  <p
+                    onClick={() => goToCommenter(c)}
+                    className="text-xs text-brand-300 font-medium cursor-pointer hover:underline w-fit"
+                  >
                     {c.user?.username || `user_${c.user_id}`}
                   </p>
                   <p className="text-xs text-gray-300">{c.content}</p>

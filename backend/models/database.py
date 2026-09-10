@@ -22,6 +22,7 @@ _POST_MIGRATIONS = [
     ("image_public_id", "VARCHAR(255) DEFAULT ''"),
     ("video_public_id", "VARCHAR(255) DEFAULT ''"),
     ("topics", "JSON"),
+    ("is_wellness", "BOOLEAN DEFAULT 0"),
 ]
 
 _STORY_MIGRATIONS = [

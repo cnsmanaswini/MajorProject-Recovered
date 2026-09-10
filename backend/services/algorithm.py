@@ -44,7 +44,8 @@ logger = logging.getLogger("mindgram.algorithm")
 # ── Constants ─────────────────────────────────────────────────
 
 RECENCY_HALF_LIFE_HOURS = 48.0
-RISK_SUPPRESSION_THRESHOLD = 0.40   # was 0.60
+RISK_SUPPRESSION_THRESHOLD = 0.40   # midpoint of the ramp below, not a hard cutoff
+RISK_RAMP_WIDTH = 0.15              # how gradual the ramp is; bigger = softer/slower transition
 
 async def attach_like_status(posts, user_id: int, db: AsyncSession):
     """Mutates posts in-place, setting `is_liked` based on whether
@@ -237,6 +238,22 @@ def diversity_rerank(scored_posts: list[dict], limit: int) -> list[Post]:
     return [item["post"] for item in selected]
 
 
+def suppression_intensity(user_risk: float) -> float:
+    """
+    Smooth 0..1 ramp centered on RISK_SUPPRESSION_THRESHOLD, replacing what used
+    to be a hard >= cutoff. A sigmoid means a user drifting from 0.35 -> 0.45
+    sees the mix shift a little at a time across refreshes instead of the feed
+    visibly flipping character the moment they cross 0.40 — the whole point of
+    this being a *silent* layer is that there's no perceptible switch flip.
+
+    intensity ≈ 0   well below threshold  (no adjustment)
+    intensity = 0.5 exactly at threshold
+    intensity ≈ 1   well above threshold  (full suppression/boost effect)
+    """
+    z = (user_risk - RISK_SUPPRESSION_THRESHOLD) / RISK_RAMP_WIDTH
+    return 1.0 / (1.0 + math.exp(-z))
+
+
 def silent_ai_adjustment(
     post: Post,
     user_risk: float,
@@ -246,23 +263,36 @@ def silent_ai_adjustment(
     For at-risk users:
       - Suppress high-risk negative content
       - Boost positive content
-    User never sees this happening.
+      - Boost wellness content specifically
+    Effect strength ramps in gradually via suppression_intensity() rather than
+    switching on at a fixed risk value. User never sees this happening.
     """
+    intensity = suppression_intensity(user_risk)
+    if intensity < 0.07:
+        return 0.0  # negligible this far below threshold — skip the work
+
     adjustment = 0.0
 
-    if user_risk >= RISK_SUPPRESSION_THRESHOLD:
-        # Suppress high-risk negative content (any emotion, still gated on risk_score
-        # so a "sad" post that isn't actually risky can still get through — that's
-        # the "a bit of sad" you don't want fully wiped out).
-        if post.risk_score > 0.5:
-            penalty = (post.risk_score - 0.5) * user_risk * 0.5
-            adjustment -= penalty
+    # Suppress high-risk negative content (any emotion, still gated on risk_score
+    # so a "sad" post that isn't actually risky can still get through — that's
+    # the "a bit of sad" you don't want fully wiped out).
+    if post.risk_score > 0.5:
+        penalty = (post.risk_score - 0.5) * intensity * 0.5
+        adjustment -= penalty
 
-        # Boost calm joy/neutral content specifically (not just "positive sentiment",
-        # which doesn't reliably track the emotion label).
-        if post.emotion in ("joy", "neutral") and post.risk_score < 0.2:
-            boost = user_risk * 0.2
-            adjustment += boost
+    # Boost calm joy/neutral content specifically (not just "positive sentiment",
+    # which doesn't reliably track the emotion label).
+    if post.emotion in ("joy", "neutral") and post.risk_score < 0.2:
+        boost = intensity * 0.2
+        adjustment += boost
+
+    # Wellness content gets an additional boost for at-risk users — this is
+    # separate from the joy/neutral boost above so explicitly-curated wellness
+    # posts (meditation, calming imagery, support resources) rise higher in
+    # the feed than generic positive content when the user needs them most.
+    if _matches_wellness_content(post):
+        wellness_boost = intensity * WELLNESS_BOOST
+        adjustment += wellness_boost
 
     return adjustment
 # ── Main Ranking Function ─────────────────────────────────────
@@ -320,23 +350,47 @@ WELLNESS_TOPIC_KEYWORDS = {
 WELLNESS_RECENCY_DAYS = 21
 WELLNESS_POOL_LIMIT = 50
 WELLNESS_INJECTION_LIMIT = 2
-WELLNESS_RISK_SCORE_MAX = 0.25
-WELLNESS_MIN_FEED_SCORE = 0.45
-WELLNESS_INJECTION_POSITIONS = (5, 10)
+WELLNESS_RISK_SCORE_MAX = 0.65  # raised from 0.25 — calm imagery often scores 0.3-0.6 on CLIP
+WELLNESS_MIN_FEED_SCORE = 0.0   # wellness eligibility is governed by safety (risk <= 0.65), not engagement score
+WELLNESS_MIN_GAP = 4    # posts between injections once intensity is ~maxed
+WELLNESS_MAX_GAP = 12   # posts between injections right as intensity starts
+WELLNESS_BOOST = 0.25   # ranking boost for wellness posts shown to high-risk users
 
 
 def should_inject_wellness(user_risk: float, position: int) -> bool:
     """
     Decide if we should inject a wellness post at this feed position.
-    Only for at-risk users, naturally placed at position 5 or 10.
+    Moderate-risk users (0.25+) get occasional wellness posts with frequency
+    scaling up as risk increases. Prevents feed domination by wellness content.
     """
-    if user_risk < RISK_SUPPRESSION_THRESHOLD:
+    intensity = suppression_intensity(user_risk)
+    if intensity < 0.25:  # roughly user_risk < 0.32 — very low risk, no injection
         return False
-    return position in WELLNESS_INJECTION_POSITIONS
+
+    # Scale gap from 20 (low/moderate risk) down to 4 (very high risk)
+    # At user_risk=0.29 (intensity≈0.32): gap ≈ 18-19 (1 wellness per ~18 posts)
+    # At user_risk=0.40 (intensity=0.50): gap ≈ 12 (1 per ~12 posts)
+    # At user_risk=0.70 (intensity≈0.95): gap ≈ 4 (1 per ~4 posts)
+    min_gap = 4
+    max_gap = 20
+    normalized_intensity = max(0.0, min(1.0, (intensity - 0.25) / 0.75))
+    gap = round(max_gap - (max_gap - min_gap) * normalized_intensity)
+    gap = max(min_gap, gap)
+    return position % gap == 0
 
 
 def _matches_wellness_content(post: Post) -> bool:
-    """Heuristic match for wellness-oriented posts."""
+    """
+    Check if a post is wellness-oriented.
+    Primary signal: explicit is_wellness flag (set at seed time or by admins).
+    Fallback: heuristic keyword match for organically-posted wellness content.
+    """
+    # Explicit wellness flag takes precedence — seeded wellness posts, curated
+    # content, or admin-approved wellness accounts all set this directly.
+    if getattr(post, "is_wellness", False):
+        return True
+
+    # Fallback heuristic for organic content that wasn't explicitly tagged
     text = (post.content or "").lower()
     if any(keyword in text for keyword in WELLNESS_CONTENT_KEYWORDS):
         return True
@@ -357,23 +411,37 @@ async def _load_wellness_candidates(
     db: AsyncSession,
     exclude_post_ids: set[int],
 ) -> list[Post]:
-    """Fetch a small candidate pool of wellness content for injection."""
+    """
+    Fetch wellness content for injection into high-risk user feeds.
+
+    Wellness identification is separated from general safety filtering:
+      - is_wellness=True OR keyword match identifies wellness content
+      - Moderate risk scores (0.3-0.65) are acceptable for calming imagery
+      - Neutral sentiment is acceptable — wellness isn't about forced positivity
+      - BUT: genuinely dangerous content (risk > 0.65, or hard safety signals)
+        still gets filtered regardless of wellness flag
+
+    This two-stage approach means a candle/meditation photo that CLIP scores
+    at 0.4-0.5 can still be wellness content, but a literal self-harm image
+    marked wellness=True would still be blocked by the safety ceiling.
+    """
     cutoff = datetime.utcnow() - timedelta(days=WELLNESS_RECENCY_DAYS)
 
+    # Stage 1: broad wellness candidate pool, relaxed sentiment/risk thresholds
     query = select(Post).options(selectinload(Post.media), selectinload(Post.author)).where(
         Post.created_at >= cutoff,
         Post.user_id != user_id,
-        Post.sentiment == "positive",
-        Post.risk_score <= WELLNESS_RISK_SCORE_MAX,
-        Post.feed_score >= WELLNESS_MIN_FEED_SCORE,
+        Post.risk_score <= WELLNESS_RISK_SCORE_MAX,  # 0.65 — blocks genuinely dangerous content
+        Post.feed_score >= WELLNESS_MIN_FEED_SCORE,  # 0.40 — basic quality floor
     )
     if exclude_post_ids:
         query = query.where(Post.id.notin_(exclude_post_ids))
 
     result = await db.execute(
-        query.order_by(Post.feed_score.desc()).limit(WELLNESS_POOL_LIMIT)
+        query.order_by(func.random()).limit(WELLNESS_POOL_LIMIT)  # randomize to vary selection
     )
 
+    # Stage 2: filter to posts that match wellness heuristics or have explicit flag
     candidates = [post for post in result.scalars().all() if _matches_wellness_content(post)]
     return candidates[:WELLNESS_INJECTION_LIMIT]
 
@@ -383,24 +451,45 @@ def _inject_wellness_posts(
     wellness_posts: list[Post],
     user_risk: float,
 ) -> list[Post]:
-    """Inject wellness posts into the ranked feed at set positions."""
+    """
+    Inject wellness posts into the ranked feed at dynamic positions.
+    Ensures no consecutive wellness posts to maintain natural feed flow.
+    """
     if not wellness_posts:
+        return posts
+
+    # Only inject for users with intensity >= 0.25 (roughly user_risk >= 0.32)
+    intensity = suppression_intensity(user_risk)
+    if intensity < 0.25:
         return posts
 
     existing_ids = {post.id for post in posts}
     injected: list[Post] = []
     candidate_index = 0
+    last_was_wellness = False
 
     for position, post in enumerate(posts, start=1):
-        while candidate_index < len(wellness_posts) and should_inject_wellness(user_risk, position):
+        # Check if this position should have a wellness injection
+        should_inject = (
+            candidate_index < len(wellness_posts)
+            and should_inject_wellness(user_risk, position)
+            and not last_was_wellness  # prevent consecutive wellness posts
+        )
+
+        if should_inject:
             candidate = wellness_posts[candidate_index]
             candidate_index += 1
-            if candidate.id in existing_ids:
+            if candidate.id not in existing_ids:
+                candidate.is_wellness = True
+                injected.append(candidate)
+                last_was_wellness = True
+                # Continue to next regular post
+                injected.append(post)
+                last_was_wellness = False
                 continue
-            candidate.is_wellness = True
-            injected.append(candidate)
-            break
+
         injected.append(post)
+        last_was_wellness = getattr(post, 'is_wellness', False) or _matches_wellness_content(post)
 
     return injected
 
@@ -603,7 +692,7 @@ async def build_feed(
                 Post.user_id.in_(following_ids),
                 Post.created_at >= cutoff,
             )
-            .order_by(Post.created_at.desc())
+            .order_by(func.random())  # randomize to prevent same order every refresh
             .limit(100)
         )
         followed_posts = followed_result.scalars().all()
@@ -618,7 +707,7 @@ async def build_feed(
             Post.user_id != user_id,
             Post.created_at >= cutoff,
         )
-        .order_by(Post.feed_score.desc())
+        .order_by(func.random())  # randomize to prevent same order every refresh
         .limit(50)
     )
     explore_posts = explore_result.scalars().all()

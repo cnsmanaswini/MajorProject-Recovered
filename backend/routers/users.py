@@ -251,6 +251,7 @@ async def toggle_follow(
     return {
         "status": action,
         "followers_count": target.followers_count,
+        "following_count": current_user.following_count,
     }
 
 

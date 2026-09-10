@@ -43,10 +43,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 load_dotenv()
 
 from ai.pipeline.loader import preload_models                       # noqa: E402
-from models.database import AsyncSessionLocal                       # noqa: E402
+from models.database import AsyncSessionLocal, create_tables         # noqa: E402
 from models.models import User, Post, PostMedia, EmotionLog          # noqa: E402
 from ai.pipeline.analyzer import analyze_text                        # noqa: E402
 from services.topic_utils import extract_topics                      # noqa: E402
+from services.algorithm import (                                     # noqa: E402
+    WELLNESS_RISK_SCORE_MAX,
+    WELLNESS_MIN_FEED_SCORE,
+    _matches_wellness_content,
+)
 from services.cloudinary_service import _save_local, UPLOAD_ROOT     # noqa: E402
 from sqlalchemy import select                                        # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession                      # noqa: E402
@@ -139,6 +144,9 @@ async def seed():
 
     preload_models()
 
+    # Ensure the database tables exist and migrations have run (including is_wellness column)
+    await create_tables()
+
     async with AsyncSessionLocal() as db:
         user = await get_or_create_wellness_user(db)
         print(f"✅ Using account @{user.username} (id={user.id})")
@@ -185,6 +193,7 @@ async def seed():
                     risk_score=pipeline.risk_score,
                     feed_score=pipeline.feed_score,
                     topics=extract_topics(caption, pipeline.emotion, ""),
+                    is_wellness=True,  # explicit wellness flag
                 )
                 db.add(post)
                 await db.flush()
@@ -203,16 +212,21 @@ async def seed():
                 ))
                 created += 1
 
+                # Updated eligibility check matching the new _load_wellness_candidates logic:
+                # - is_wellness flag is set (✓ always true for seeded posts)
+                # - risk_score <= WELLNESS_RISK_SCORE_MAX (0.65, raised from 0.25)
+                # - feed_score >= WELLNESS_MIN_FEED_SCORE (0.0 — no engagement floor)
+                # - sentiment can be ANY value (positive/neutral/negative all acceptable)
+                # - _matches_wellness_content() passes (captions have keywords + is_wellness flag)
                 qualifies = (
-                    pipeline.sentiment == "positive"
-                    and pipeline.risk_score <= 0.25
-                    and pipeline.feed_score >= 0.45
+                    pipeline.risk_score <= WELLNESS_RISK_SCORE_MAX
+                    and pipeline.feed_score >= WELLNESS_MIN_FEED_SCORE
                 )
                 print(
                     f"  ({created}/{len(CAPTIONS_AND_QUERIES)}) "
                     f"sentiment={pipeline.sentiment:9s} emotion={pipeline.emotion:8s} "
                     f"risk={pipeline.risk_score:.3f} feed_score={pipeline.feed_score:.3f} "
-                    f"wellness_eligible={qualifies}  \"{caption[:50]}\""
+                    f"is_wellness=True wellness_eligible={qualifies}  \"{caption[:50]}\""
                 )
 
                 if created % 5 == 0:

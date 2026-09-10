@@ -30,14 +30,15 @@ export default function MessagesPage() {
   }, [])
 
   // Load thread when selecting conversation
+  // Backend route is GET /messages/thread/{user_id}/{other_user_id}
   useEffect(() => {
     if (!selected) return
     setLoading(true)
-    api.get(`/messages/thread/${selected.id}`)
+    api.get(`/messages/thread/${user?.id}/${selected.id}`)
       .then(r => setThread(r.data))
       .catch(() => setThread([]))
       .finally(() => setLoading(false))
-  }, [selected])
+  }, [selected, user?.id])
 
   // Check mutual-follow status when selecting a conversation
   useEffect(() => {

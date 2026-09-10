@@ -88,7 +88,7 @@ async def get_explore(
         .order_by(
             Post.feed_score.desc(),
             Post.likes_count.desc(),
-            Post.id.desc()  # tiebreaker so pagination is stable when scores/likes tie
+            Post.id.desc(),
         )
         .offset(offset)
         .limit(limit)

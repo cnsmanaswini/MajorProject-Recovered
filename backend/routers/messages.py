@@ -266,13 +266,18 @@ async def send_message(
      message=f"{sender.username} sent you a message",
     )
 
-    # Notify receiver via WebSocket if online
+    # Notify receiver via WebSocket if online — payload must match the
+    # websocket path's shape so the client handles both identically.
     await manager.send_to_user(body.receiver_id, {
         "type": "new_message",
         "id": msg.id,
         "sender_id": sender.id,
+        "receiver_id": body.receiver_id,
         "content": body.content,
         "created_at": msg.created_at.isoformat(),
+        "sentiment": msg.sentiment,
+        "emotion": msg.emotion,
+        "risk_score": msg.risk_score,
         "sender": {
             "username": sender.username,
             "avatar_url": sender.avatar_url,

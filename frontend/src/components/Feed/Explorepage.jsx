@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Heart, MessageCircle, Play, Layers, X, ChevronLeft, ChevronRight,
-  Bookmark, Search, Flame,
+  Bookmark, Search, Flame, RefreshCw,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -241,11 +242,66 @@ function ExploreTile({ post, wide, onOpen }) {
   );
 }
 
-function Lightbox({ posts, index, onClose, onNavigate }) {
+function Lightbox({ posts, index, onClose, onNavigate, api, user }) {
+  const navigate = useNavigate();
   const post = posts[index];
   const media = getPostMedia(post)[0];
   const author = post.author || {};
   const isVideo = media?.media_type === "video" || post.is_reel;
+
+  const [liked, setLiked] = useState(!!((post.is_liked ?? post.liked) ?? false));
+  const [likeCount, setLikeCount] = useState(post.likes_count ?? 0);
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  const handleLike = async () => {
+    const prevLiked = liked;
+    const prevCount = likeCount;
+    setLiked(!prevLiked);
+    setLikeCount((c) => (!prevLiked ? c + 1 : c - 1));
+    try {
+      const res = await api.post(`/posts/${post.id}/like`);
+      setLiked(!!res.data.is_liked);
+      setLikeCount(res.data.likes_count ?? likeCount);
+    } catch {
+      setLiked(prevLiked);
+      setLikeCount(prevCount);
+    }
+  };
+
+  const loadComments = async () => {
+    try {
+      const res = await api.get(`/interactions/comments/${post.id}`);
+      setComments(res.data || []);
+    } catch {
+      setComments([]);
+    }
+  };
+
+  const handleCommentToggle = () => {
+    setShowComments((s) => !s);
+    if (!showComments) loadComments();
+  };
+
+  const submitComment = async (e) => {
+    e.preventDefault();
+    if (!newComment.trim() || posting) return;
+    setPosting(true);
+    try {
+      await api.post("/interactions/comment", {
+        post_id: post.id,
+        user_id: user?.id,
+        content: newComment.trim(),
+      });
+      setNewComment("");
+      loadComments();
+      setLikeCount((c) => c + (post.likes_count ?? 0));
+    } catch {}
+    setPosting(false);
+  };
+
 
   useEffect(() => {
     const onKey = (e) => {
@@ -291,31 +347,102 @@ function Lightbox({ posts, index, onClose, onNavigate }) {
         </div>
 
         <div className="sm:w-[38%] flex flex-col text-white">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800">
+          <button
+            type="button"
+            onClick={() => {
+              const username = author.username;
+              if (username) navigate(`/profile/${username}`);
+            }}
+            className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 w-full text-left"
+          >
             <img src={author.avatar_url || FALLBACK_AVATAR(author.username || post.user_id)} alt="" className="w-8 h-8 rounded-full object-cover" />
             <span className="font-semibold text-sm">{author.username || "unknown"}</span>
             <span className="ml-auto">
               <EmotionBadge emotion={post.emotion} sarcasm={post.sarcasm} />
             </span>
-          </div>
+          </button>
 
           <div className="flex-1 px-4 py-3 overflow-y-auto">
             <div className="flex gap-3 text-sm">
-              <img src={author.avatar_url || FALLBACK_AVATAR(author.username || post.user_id)} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
-              <p>
-                <span className="font-semibold mr-1.5">{author.username || "unknown"}</span>
-                {post.content || <span className="text-neutral-500">No caption</span>}
-              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const username = author.username;
+                  if (username) navigate(`/profile/${username}`);
+                }}
+                className="flex items-center gap-3 text-left flex-1 min-w-0"
+              >
+                <img src={author.avatar_url || FALLBACK_AVATAR(author.username || post.user_id)} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                <p className="min-w-0">
+                  <span className="font-semibold mr-1.5">{author.username || "unknown"}</span>
+                  {post.content || <span className="text-neutral-500">No caption</span>}
+                </p>
+              </button>
             </div>
           </div>
 
           <div className="px-4 pt-3 pb-2 border-t border-neutral-800">
             <div className="flex items-center gap-4 mb-2">
-              <Heart className="w-6 h-6" />
-              <MessageCircle className="w-6 h-6" />
-              <Bookmark className="w-6 h-6 ml-auto" />
+              <button
+                type="button"
+                onClick={handleLike}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm transition-all ${
+                  liked
+                    ? "text-red-400 bg-red-400/10"
+                    : "text-white/80 hover:text-red-400 hover:bg-red-400/10"
+                }`}
+              >
+                <Heart className={`w-4 h-4 ${liked ? "fill-white" : "fill-none"}`} />
+                <span>{formatCount(likeCount)}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCommentToggle}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm text-white/80 hover:text-brand-300 hover:bg-brand-500/10 transition-all"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>{formatCount(post.comments_count ?? 0)}</span>
+              </button>
+              <Bookmark className="w-6 h-6 ml-auto opacity-60" />
             </div>
-            <p className="text-sm font-semibold">{formatCount(post.likes_count)} likes</p>
+            {showComments && (
+              <div className="mt-2 space-y-2">
+                {comments.length === 0 ? (
+                  <p className="text-xs text-neutral-500 text-center py-2">No comments yet. Be the first!</p>
+                ) : (
+                  comments.map((c) => (
+                    <div key={c.id} className="flex gap-2 text-sm">
+                      <img
+                        src={c.user?.avatar_url || FALLBACK_AVATAR(c.user?.username || c.user_id)}
+                        alt=""
+                        className="w-6 h-6 rounded-full object-cover shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs text-neutral-300">
+                          <span className="font-semibold text-white cursor-default">{c.user?.username || `user_${c.user_id}`}</span>
+                          <span className="text-neutral-500"> {c.content}</span>
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <form onSubmit={submitComment} className="flex gap-2 mt-2">
+                  <input
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Add a comment..."
+                    className="flex-1 bg-neutral-800 rounded-lg px-3 py-1.5 text-sm text-white placeholder-neutral-500 outline-none focus:ring-1 focus:ring-brand-500/50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newComment.trim() || posting}
+                    className="btn-primary text-xs py-1.5 px-3 disabled:opacity-40"
+                  >
+                    Post
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -328,7 +455,7 @@ function Lightbox({ posts, index, onClose, onNavigate }) {
 // ---------------------------------------------------------------------------
 
 export default function ExplorePage() {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
 
   const [allPosts, setAllPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -349,28 +476,32 @@ export default function ExplorePage() {
     return res.data;
   }, [api]);
 
-  // Initial load
+  const refresh = useCallback(async () => {
+    if (!api) return;
+    setLoading(true);
+    setError(null);
+    setLightboxIndex(null);
+    try {
+      const [posts, trendingRes] = await Promise.all([
+        fetchPage(0),
+        api.get("/feed/trending", { params: { limit: 8 } }).catch(() => ({ data: [] })),
+      ]);
+      offsetRef.current = posts.length;
+      // Replace, do not merge — refresh must show the fresh/reordered posts.
+      setAllPosts(posts);
+      setTrending(trendingRes.data || []);
+      setHasMore(posts.length === PAGE_SIZE);
+    } catch (err) {
+      setError("Couldn't load explore right now. Pull to refresh in a bit.");
+    } finally {
+      setLoading(false);
+    }
+  }, [api, fetchPage]);
+
+  // Initial load on mount
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [posts, trendingRes] = await Promise.all([
-          fetchPage(0),
-          api.get("/feed/trending", { params: { limit: 8 } }).catch(() => ({ data: [] })),
-        ]);
-        if (cancelled) return;
-        offsetRef.current = posts.length;
-        setAllPosts(posts);
-        setTrending(trendingRes.data || []);
-        setHasMore(posts.length === PAGE_SIZE);
-      } catch (err) {
-        if (!cancelled) setError("Couldn't load explore right now. Pull to refresh in a bit.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fetchPage, api]);
+    refresh();
+  }, [refresh]);
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMore) return;
@@ -446,6 +577,17 @@ export default function ExplorePage() {
     <div className="min-h-screen" style={{ background: "#000" }}>
       <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
       <div className="max-w-4xl mx-auto px-1 py-3">
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="font-display text-2xl text-white">Explore</h1>
+          <button
+            onClick={refresh}
+            className="btn-ghost py-1.5 px-3 text-sm flex items-center gap-1.5"
+            aria-label="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
         <SearchBar value={query} onChange={setQuery} />
         <CategoryChips chips={topicChips} active={activeTopic} onSelect={setActiveTopic} />
 
@@ -488,7 +630,7 @@ export default function ExplorePage() {
       </div>
 
       {lightboxIndex !== null && (
-        <Lightbox posts={displayedPosts} index={lightboxIndex} onClose={() => setLightboxIndex(null)} onNavigate={navigate} />
+        <Lightbox posts={displayedPosts} index={lightboxIndex} onClose={() => setLightboxIndex(null)} onNavigate={navigate} api={api} user={user} />
       )}
     </div>
   );

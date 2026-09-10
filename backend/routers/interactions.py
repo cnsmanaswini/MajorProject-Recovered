@@ -31,10 +31,21 @@ async def record_interaction(body: InteractionCreate, db: AsyncSession = Depends
         raise HTTPException(status_code=404, detail="Post not found")
 
     if body.action == "like":
+        # Check for existing like to prevent duplicates
+        existing_like = await db.execute(
+            select(Like).where(
+                Like.post_id == body.post_id,
+                Like.user_id == body.user_id
+            )
+        )
+        if existing_like.scalar_one_or_none():
+            # Already liked, return success without creating duplicate
+            return {"status": "ok", "action": "already_liked", "post_id": body.post_id}
+
         like = Like(post_id=body.post_id, user_id=body.user_id)
         db.add(like)
         post.likes_count += 1
-        await db.commit()                                        # commit like first
+        await db.commit()
         await update_user_interests(body.user_id, post.emotion, db, weight=0.3)
         await log_like_behavioral_signal(body.user_id, post, db)
         return {"status": "ok", "action": body.action, "post_id": body.post_id}
@@ -47,6 +58,11 @@ async def record_interaction(body: InteractionCreate, db: AsyncSession = Depends
         if like:
             await db.delete(like)
             post.likes_count = max(0, post.likes_count - 1)
+            await db.commit()
+            return {"status": "ok", "action": body.action, "post_id": body.post_id}
+        else:
+            # Not liked, nothing to unlike
+            return {"status": "ok", "action": "not_liked", "post_id": body.post_id}
 
     elif body.action == "not_interested":
         # Strong explicit negative signal — deliberate user choice, so it
